@@ -22,7 +22,7 @@ def route_schema(agent_names: list[str]) -> dict[str, Any]:
         "type": "object",
         "properties": {
             "route": {"type": "string", "enum": agent_names},
-            "rationale": {"type": "string", "description": "one short sentence"},
+            "rationale": {"type": "string", "description": "under 12 words"},
         },
         "required": ["route", "rationale"],
     }
@@ -36,9 +36,9 @@ def make_router_node(llm: LLMClient, agents: dict[str, str]):
 
     async def router_node(state: AgentState, *, writer=None) -> AgentState:
         trace(writer, "router", "start")
-        messages = [{"role": "system", "content": system}, *state["messages"][-10:]]
+        messages = [{"role": "system", "content": system}, *state["messages"][-4:]]
         try:
-            result = await llm.chat_structured("router", messages, schema)
+            result = await llm.chat_structured("router", messages, schema, think=False)
             route = result.get("route", "chat")
             rationale = result.get("rationale", "")
         except (LLMError, KeyError, ValueError) as exc:

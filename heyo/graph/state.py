@@ -21,8 +21,8 @@ class AgentState(TypedDict, total=False):
     messages: Annotated[list[dict[str, Any]], _append]  # OpenAI-format chat history
     route: str  # chosen agent: chat|files|web|apps|mcp
     rationale: str  # router's reasoning, surfaced in the UI trace
-    skill_context: str  # taught .md skills retrieved for this request (M3)
-    memory_context: str  # relevant past-conversation memories (M3)
+    skills: list[dict[str, Any]]  # taught .md skills retrieved for this request
+    memory_context: str  # relevant past-conversation memories
     response: str  # final assistant answer
 
 

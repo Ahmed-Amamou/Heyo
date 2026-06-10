@@ -128,6 +128,22 @@ skills/      taught .md skills        scripts/   setup + model-fit
 
 ## Hardware notes
 
-Developed against a 6GB GTX 1660 Ti: `qwen3:4b` for routing/chat, `nomic-embed-text`
-embeddings, faster-whisper `small` (int8) — all comfortably resident. `fit_models.py`
-re-derives this for whatever hardware it finds.
+Developed against a 6GB GTX 1660 Ti: `qwen2.5-coder:3b` for routing/agents/chat,
+`nomic-embed-text` embeddings, faster-whisper `small` (int8) — all comfortably
+resident. `fit_models.py` re-derives this for whatever hardware it finds.
+
+Hard-won performance lessons baked into the defaults (measured on the 1660 Ti):
+
+- **Avoid reasoning models for agent plumbing.** qwen3's hidden `<think>` blocks
+  added 5–20s per pipeline step, and `/no_think` is unreliable in multi-turn tool
+  conversations. A small non-reasoning model routes and calls tools in <1s.
+- **Avoid Ollama's `response_format` (grammar-constrained JSON)** on consumer GPUs:
+  measured 42s vs 4s for the same routing call with prompt-based JSON + parsing.
+- **Keep prompts short.** Prefill ran at ~266 tok/s (no tensor cores) while
+  generation hit ~59 tok/s — on cards like this, prompt length dominates latency.
+  Skills are injected only into the agent they target; history windows are tight.
+- **Small models botch tool-call formatting** — the agent loop parses tool calls
+  written as JSON text (soft tool calls) instead of failing.
+
+Measured end-to-end after tuning: chat first token ~1.3s, file operation ~2.2s,
+app launch ~7s (was 19–56s before).

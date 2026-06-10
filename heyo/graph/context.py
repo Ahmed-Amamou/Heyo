@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from heyo.graph.state import AgentState, trace
 from heyo.memory.qdrant import MemoryStore
-from heyo.skills.loader import format_skills
 
 
 def make_prepare_node(memory: MemoryStore | None):
@@ -17,17 +16,17 @@ def make_prepare_node(memory: MemoryStore | None):
             return {}
         trace(writer, "prepare", "start")
         query = state["messages"][-1]["content"]
-        memory_context = skill_context = ""
+        memory_context = ""
+        skills: list = []
         try:
             memories = await memory.recall(query)
             memory_context = "\n".join(f"- {m}" for m in memories)
             skills = await memory.find_skills(query)
-            skill_context = format_skills(skills)
             trace(writer, "prepare", "done",
                   memories=len(memories), skills=[s["name"] for s in skills])
         except Exception as exc:
             trace(writer, "prepare", "done", error=f"memory unavailable: {exc}")
-        return {"memory_context": memory_context, "skill_context": skill_context}
+        return {"memory_context": memory_context, "skills": skills}
 
     return prepare_node
 

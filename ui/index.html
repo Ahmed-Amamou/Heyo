@@ -110,6 +110,15 @@ header{
 .msg .body{white-space:pre-wrap;line-height:1.75}
 .msg.user .body{color:#9fb39a;border-left:2px solid var(--line);padding-left:12px}
 .msg.bot .body{color:var(--txt);text-shadow:0 0 6px rgba(200,214,194,.12)}
+.think{
+  margin:0 0 8px;padding:7px 10px;border-left:2px dashed var(--dim);
+  color:var(--dim);font-size:12px;line-height:1.6;white-space:pre-wrap;
+  max-height:130px;overflow-y:auto;background:rgba(93,111,93,.05)
+}
+.think summary{cursor:pointer;letter-spacing:.2em;font-size:10px;text-transform:uppercase;
+  color:var(--amber);margin-bottom:4px;list-style:none}
+.think summary::before{content:"◈ "}
+details.think:not([open]) summary::before{content:"◇ "}
 .cursor::after{content:"▋";color:var(--green);animation:pulse .8s infinite}
 .hello{color:var(--dim);text-align:center;margin-top:14vh;line-height:2.2;letter-spacing:.06em}
 .hello .big{font-size:30px;color:var(--amber);letter-spacing:.45em;
@@ -253,7 +262,16 @@ form.addEventListener("submit",async e=>{
   input.value="";send.disabled=true;resetPipe();
   addMsg("user",text);
   const body=addMsg("bot","");body.classList.add("cursor");
-  let acc="";
+  let acc="",thinkEl=null,thinkTxt=null;
+  const think=t=>{
+    if(!thinkEl){
+      thinkEl=document.createElement("details");thinkEl.className="think";thinkEl.open=true;
+      thinkEl.innerHTML="<summary>thinking</summary><span></span>";
+      body.parentElement.insertBefore(thinkEl,body);
+      thinkTxt=thinkEl.querySelector("span");
+    }
+    thinkTxt.textContent+=t;thinkEl.scrollTop=thinkEl.scrollHeight;msgs.scrollTop=msgs.scrollHeight;
+  };
   try{
     const resp=await fetch("/chat",{method:"POST",
       headers:{"Content-Type":"application/json"},
@@ -270,7 +288,11 @@ form.addEventListener("submit",async e=>{
         else if(line.startsWith("data:")){
           const data=JSON.parse(line.slice(5));
           if(event==="trace")onTrace(data);
-          else if(event==="token"){acc+=data.text;body.textContent=acc;msgs.scrollTop=msgs.scrollHeight;}
+          else if(event==="thinking")think(data.text);
+          else if(event==="token"){
+            if(thinkEl&&!acc)thinkEl.open=false; // collapse thoughts once the answer starts
+            acc+=data.text;body.textContent=acc;msgs.scrollTop=msgs.scrollHeight;
+          }
           else if(event==="done"){sessionId=data.session_id;if(data.response)body.textContent=data.response;}
           else if(event==="error"){body.textContent=acc+"\n✗ "+data.detail;body.classList.add("err");}
         }

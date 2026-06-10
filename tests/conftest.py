@@ -28,9 +28,10 @@ class FakeLLM(LLMClient):
         self.stream_text = stream_text
         self.calls: list[dict[str, Any]] = []
 
-    async def chat(self, role, messages, tools=None, temperature=0.2, json_schema=None):
-        self.calls.append({"role": role, "messages": messages, "tools": tools})
-        if json_schema is not None:
+    async def chat(self, role, messages, tools=None, temperature=0.2, json_schema=None,
+                   think=True):
+        self.calls.append({"role": role, "messages": messages, "tools": tools, "think": think})
+        if role == "router" or json_schema is not None:
             return {"content": json.dumps({"route": self.route_to, "rationale": "test"})}
         return self.replies.pop(0) if self.replies else {"content": "done"}
 

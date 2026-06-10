@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from heyo.graph.agents.base import relevant_skills
 from heyo.graph.state import AgentState, emit, trace
 from heyo.llm.client import LLMClient
 
@@ -17,16 +18,19 @@ def make_chat_agent(llm: LLMClient):
     async def chat_node(state: AgentState, *, writer=None) -> AgentState:
         trace(writer, "chat", "start")
         system = CHAT_PROMPT
-        if state.get("skill_context"):
-            system += "\n\n# Taught skills\n" + state["skill_context"]
+        skill_context = relevant_skills(state, "chat")
+        if skill_context:
+            system += "\n\n# Taught skills\n" + skill_context
         if state.get("memory_context"):
             system += "\n\n# Relevant memories\n" + state["memory_context"]
-        messages = [{"role": "system", "content": system}, *state["messages"][-20:]]
+        messages = [{"role": "system", "content": system}, *state["messages"][-10:]]
 
         chunks: list[str] = []
         thinking = False
         async for tok in llm.stream("general", messages):
-            # Strip <think> blocks from reasoning models before they reach the user.
+            # Reasoning models emit a <think> block first: stream it live as
+            # "thinking" events (shown dimmed in the UI) but keep it out of the
+            # final response (and out of TTS).
             if "<think>" in tok:
                 thinking = True
                 continue
@@ -34,6 +38,7 @@ def make_chat_agent(llm: LLMClient):
                 thinking = False
                 continue
             if thinking:
+                emit(writer, "thinking", text=tok)
                 continue
             chunks.append(tok)
             emit(writer, "token", text=tok)

@@ -10,6 +10,14 @@ from typing import Any, Callable
 
 from heyo.graph.state import AgentState, emit, trace
 from heyo.llm.client import LLMClient
+from heyo.skills.loader import format_skills
+
+
+def relevant_skills(state: AgentState, agent_name: str) -> str:
+    """Only the skills taught for this agent — keeps prompts small, which matters:
+    prefill is the bottleneck on consumer GPUs (~266 tok/s on a GTX 1660 Ti)."""
+    skills = [s for s in state.get("skills", []) if s.get("agent") in (agent_name, "any")]
+    return format_skills(skills) if skills else ""
 
 
 @dataclass
@@ -61,6 +69,34 @@ class ToolKit:
             return f"error: {exc}"
 
 
+def parse_soft_tool_call(content: str, toolkit: ToolKit) -> tuple[str, dict] | None:
+    """Detect a tool call written as JSON text instead of the tool_calls channel.
+
+    Small local models frequently do this (e.g. ```json {"name": "write_file",
+    "arguments": {...}} ```). Returns (tool_name, arguments) or None.
+    """
+    text = content.strip()
+    if "```" in text:
+        for block in text.split("```")[1::2]:
+            block = block.removeprefix("json").strip()
+            found = parse_soft_tool_call(block, toolkit)
+            if found:
+                return found
+        return None
+    start, end = text.find("{"), text.rfind("}")
+    if start == -1 or end <= start:
+        return None
+    try:
+        data = json.loads(text[start : end + 1])
+    except json.JSONDecodeError:
+        return None
+    name = data.get("name") or data.get("tool") or data.get("function")
+    args = data.get("arguments") or data.get("parameters") or {}
+    if isinstance(name, str) and name in toolkit.tools and isinstance(args, dict):
+        return name, args
+    return None
+
+
 def make_tool_agent(
     name: str,
     llm: LLMClient,
@@ -74,22 +110,36 @@ def make_tool_agent(
     async def agent_node(state: AgentState, *, writer=None) -> AgentState:
         trace(writer, name, "start")
         system = system_prompt
-        if state.get("skill_context"):
-            system += "\n\n# Taught skills (follow these precisely)\n" + state["skill_context"]
+        skill_context = relevant_skills(state, name)
+        if skill_context:
+            system += "\n\n# Taught skills (follow these precisely)\n" + skill_context
         if state.get("memory_context"):
             system += "\n\n# Relevant memories\n" + state["memory_context"]
         convo: list[dict[str, Any]] = [
             {"role": "system", "content": system},
-            *state["messages"][-20:],
+            *state["messages"][-8:],
         ]
 
         for _ in range(max_iterations):
-            msg = await llm.chat(role, convo, tools=toolkit.specs() or None)
+            # think=False: hidden reasoning adds seconds per tool round with no benefit here
+            msg = await llm.chat(role, convo, tools=toolkit.specs() or None, think=False)
             tool_calls = msg.get("tool_calls") or []
             if not tool_calls:
                 content = (msg.get("content") or "").strip()
                 if "</think>" in content:
                     content = content.split("</think>", 1)[1].strip()
+                soft = parse_soft_tool_call(content, toolkit)
+                if soft:
+                    tool_name, args = soft
+                    trace(writer, name, "tool", tool=tool_name, args=json.dumps(args))
+                    result = await toolkit.execute(tool_name, args)
+                    trace(writer, name, "tool_result", tool=tool_name, result=result[:500])
+                    convo.append({"role": "assistant", "content": content})
+                    convo.append(
+                        {"role": "user", "content": f"Tool result for {tool_name}: {result}\n"
+                         "Reply with the final answer for the user (or another tool call)."}
+                    )
+                    continue
                 emit(writer, "token", text=content)
                 trace(writer, name, "done")
                 return {

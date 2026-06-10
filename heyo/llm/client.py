@@ -35,9 +35,15 @@ class LLMClient:
         tools: list[dict[str, Any]] | None = None,
         temperature: float = 0.2,
         json_schema: dict[str, Any] | None = None,
+        think: bool = True,
     ) -> dict[str, Any]:
         """One chat completion. Returns the assistant message dict
-        (keys: content, optionally tool_calls)."""
+        (keys: content, optionally tool_calls).
+
+        think=False prepends Qwen's /no_think soft switch — reasoning models burn
+        seconds of hidden tokens otherwise; harmless no-op for other models."""
+        if not think:
+            messages = [{"role": "system", "content": "/no_think"}, *messages]
         payload: dict[str, Any] = {
             "model": self.models.role(role).model,
             "messages": messages,
@@ -62,24 +68,30 @@ class LLMClient:
         messages: list[dict[str, Any]],
         json_schema: dict[str, Any],
         temperature: float = 0.0,
+        think: bool = True,
     ) -> dict[str, Any]:
         """Chat completion parsed as JSON matching json_schema.
 
-        Falls back to instructing JSON in the prompt for servers without
-        response_format support, and strips <think> blocks / code fences.
+        Prompt-based JSON is the primary path: Ollama's grammar-constrained
+        response_format is an order of magnitude slower on consumer GPUs
+        (measured 42s vs 4s on a GTX 1660 Ti). Grammar mode is the fallback
+        when the model's freeform JSON doesn't parse.
         """
+        prompted = messages + [
+            {
+                "role": "system",
+                "content": "Respond ONLY with a JSON object matching this schema, no prose: "
+                + json.dumps(json_schema),
+            }
+        ]
         try:
-            msg = await self.chat(role, messages, temperature=temperature, json_schema=json_schema)
-        except LLMError:
-            prompted = messages + [
-                {
-                    "role": "system",
-                    "content": "Respond ONLY with a JSON object matching this schema, no prose: "
-                    + json.dumps(json_schema),
-                }
-            ]
-            msg = await self.chat(role, prompted, temperature=temperature)
-        return _parse_json_content(msg.get("content") or "")
+            msg = await self.chat(role, prompted, temperature=temperature, think=think)
+            return _parse_json_content(msg.get("content") or "")
+        except (LLMError, json.JSONDecodeError):
+            msg = await self.chat(
+                role, messages, temperature=temperature, json_schema=json_schema, think=think
+            )
+            return _parse_json_content(msg.get("content") or "")
 
     async def stream(
         self,
