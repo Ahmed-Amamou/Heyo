@@ -1,0 +1,133 @@
+# Heyo
+
+**On-premise multi-LLM agentic assistant.** Say *"Heyo"* — it answers *"Yes sir, what can
+I do for you?"* — then routes your request through a LangGraph agent graph running
+entirely on your machine: local models (Ollama / vLLM), local memory (Qdrant), local
+voice (openWakeWord / faster-whisper / Piper), and your own MCP servers.
+
+```
+ voice client                     FastAPI server
+ "Heyo" → wake → STT ──HTTP──▶  POST /chat (SSE: trace/token/done)
+ ◀─ Piper TTS (spoken reply)     web console at / (chat + live agent trace)
+                                          │
+                                 LangGraph StateGraph
+                       prepare ─▶ router (structured routing)
+                  ┌─────────┬─────────┼─────────┬─────────┐
+                 chat     files      web      apps      mcp
+                (talk)  (workspace)(Playwright)(Windows  (your MCP
+                                              interop)   servers)
+                  └─────────┴─────────┼─────────┴─────────┘
+                                  finalize ◀─▶ Qdrant (memory + skills)
+                                          │
+                              Ollama / vLLM (OpenAI-compatible)
+```
+
+## Features
+
+- **Multi-agent orchestration** — a supervisor LLM routes each request (with a visible
+  rationale) to specialized agents over LangGraph conditional edges.
+- **Multi-LLM, hardware-aware** — every agent role (router, general, coder, embedder)
+  maps to a model+backend in `models.yaml`; `scripts/fit_models.py` uses
+  [llmfit](https://github.com/AlexsJones/llmfit) to pick models that actually fit your
+  GPU. Ollama by default, vLLM via a Docker profile for bigger hardware.
+- **Teachable skills** — drop a markdown file in `skills/` (frontmatter + instructions)
+  and Heyo embeds it in Qdrant; relevant skills are retrieved per request and injected
+  into the agent's prompt. That's how you teach it *your* app-launch commands, recipes,
+  conventions. Live reload: `POST /skills/reload`.
+- **Long-term memory** — every exchange is embedded into Qdrant and recalled by
+  similarity on later requests, across sessions.
+- **MCP integration** — declare your servers in `mcp.json` (claude-desktop schema,
+  stdio or HTTP); their tools are exposed to a dedicated agent via FastMCP.
+- **Voice** — always-listening wake word, offline STT/TTS, runs in WSL2 or natively on
+  Windows. See [apps/voice/README.md](apps/voice/README.md).
+- **Live agent trace** — the web console visualizes the graph in real time: nodes light
+  up, router rationale and tool calls stream in as SSE events.
+
+## Quick start
+
+```bash
+./scripts/setup.sh                     # uv + ollama + llmfit + python deps
+uv run python scripts/fit_models.py   # hardware-fit check → pulls models → models.yaml
+docker compose up -d qdrant           # vector store (memory + skills)
+uv run heyo-api                       # server + web console on http://localhost:8000
+```
+
+Voice (optional):
+
+```bash
+sudo apt install -y libportaudio2
+uv sync --extra voice
+uv run python -m apps.voice.main
+```
+
+Web agent (optional): `uv sync --extra web && uv run playwright install chromium`
+
+## Teaching Heyo a skill
+
+`skills/open-spotify.md`:
+
+```markdown
+---
+name: open-spotify
+description: how to open Spotify on this machine
+agent: apps
+triggers: spotify, play music
+---
+Open Spotify with: powershell.exe -Command "Start-Process spotify:"
+```
+
+`curl -X POST localhost:8000/skills/reload` — then say *"Heyo, open spotify"*.
+
+## Plugging in MCP servers
+
+`mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "weather": {"command": "uvx", "args": ["some-weather-mcp"]},
+    "search":  {"url": "http://localhost:9000/mcp"}
+  }
+}
+```
+
+Restart the server; an `mcp` agent appears in the graph with every tool the servers
+expose, and the router learns to dispatch to it.
+
+## Configuration
+
+| file | role |
+|---|---|
+| `.env` (from `.env.example`) | ports, URLs, workspace dir |
+| `models.yaml` (generated) | role → backend+model mapping |
+| `mcp.json` | your MCP servers |
+| `skills/*.md` | taught behaviors |
+
+vLLM instead of / alongside Ollama (needs ≥16GB VRAM for useful models):
+
+```bash
+docker compose --profile vllm up -d vllm      # then point a role's backend to "vllm"
+```
+
+## Development
+
+```bash
+uv run pytest          # mocked-LLM test suite (routing, agents, sandbox, skills, SSE)
+uv run ruff check .
+docker compose --profile full up --build      # run the API in Docker too
+```
+
+### Repo map
+
+```
+heyo/        server: config, llm client, graph (router/agents), memory, skills, api
+apps/voice/  standalone voice client (wake/STT/TTS)
+ui/          single-file web console (no build step)
+skills/      taught .md skills        scripts/   setup + model-fit
+```
+
+## Hardware notes
+
+Developed against a 6GB GTX 1660 Ti: `qwen3:4b` for routing/chat, `nomic-embed-text`
+embeddings, faster-whisper `small` (int8) — all comfortably resident. `fit_models.py`
+re-derives this for whatever hardware it finds.
