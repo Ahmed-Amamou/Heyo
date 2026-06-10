@@ -54,8 +54,8 @@ class Settings(BaseSettings):
             # Defaults for first boot before fit_models.py has run.
             cfg = ModelsConfig(
                 roles={
-                    "router": RoleConfig(model="qwen2.5-coder:3b"),
-                    "general": RoleConfig(model="qwen2.5-coder:3b"),
+                    "router": RoleConfig(model="qwen3:4b"),
+                    "general": RoleConfig(model="qwen3:4b"),
                     "embedder": RoleConfig(model="nomic-embed-text"),
                 }
             )

@@ -134,9 +134,12 @@ resident. `fit_models.py` re-derives this for whatever hardware it finds.
 
 Hard-won performance lessons baked into the defaults (measured on the 1660 Ti):
 
-- **Avoid reasoning models for agent plumbing.** qwen3's hidden `<think>` blocks
-  added 5–20s per pipeline step, and `/no_think` is unreliable in multi-turn tool
-  conversations. A small non-reasoning model routes and calls tools in <1s.
+- **Reasoning models: stream the thinking, don't hide it.** qwen3's `<think>`
+  blocks cost seconds per step — but 3B non-reasoning models hallucinate on
+  research/tool tasks. Heyo streams reasoning live into the UI ("thinking" SSE
+  events), so qwen3 is the default for agents; the router uses `/no_think`
+  (reliable single-turn) plus deterministic fast-paths. Swap `general` to
+  `qwen2.5-coder:3b` in models.yaml if you prefer speed over smarts.
 - **Avoid Ollama's `response_format` (grammar-constrained JSON)** on consumer GPUs:
   measured 42s vs 4s for the same routing call with prompt-based JSON + parsing.
 - **Keep prompts short.** Prefill ran at ~266 tok/s (no tensor cores) while

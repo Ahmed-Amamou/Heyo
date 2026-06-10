@@ -19,8 +19,10 @@ def make_prepare_node(memory: MemoryStore | None):
         memory_context = ""
         skills: list = []
         try:
-            memories = await memory.recall(query)
-            memory_context = "\n".join(f"- {m}" for m in memories)
+            # keep this small: it lands in every agent prompt, and long prompts both
+            # slow prefill and push reasoning models into context-shift territory
+            memories = await memory.recall(query, limit=3)
+            memory_context = "\n".join(f"- {m[:240]}" for m in memories)
             skills = await memory.find_skills(query)
             trace(writer, "prepare", "done",
                   memories=len(memories), skills=[s["name"] for s in skills])
@@ -37,7 +39,7 @@ def make_finalize_node(memory: MemoryStore | None):
             user_msg = next(
                 (m["content"] for m in reversed(state["messages"]) if m["role"] == "user"), ""
             )
-            exchange = f"User: {user_msg[:500]}\nAssistant: {state['response'][:500]}"
+            exchange = f"User: {user_msg[:300]}\nAssistant: {state['response'][:300]}"
             try:
                 await memory.remember(state.get("session_id", ""), exchange)
                 trace(writer, "finalize", "done", memorized=True)

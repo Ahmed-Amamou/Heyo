@@ -22,12 +22,12 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 MODELS_FILE = REPO_ROOT / "models.yaml"
 
 # Conservative defaults for ~6GB VRAM (GTX 1660 Ti class hardware).
-# Non-reasoning model on purpose: reasoning models (qwen3 etc.) burn seconds of
-# hidden <think> tokens per pipeline step, and their /no_think switch is
-# unreliable in multi-turn tool conversations.
+# qwen3 is a reasoning model: its thinking costs seconds per step but the steps
+# stream live into the UI, and answer quality is far better than 3B non-reasoning
+# models (which hallucinate on tool tasks). Router uses /no_think (single-turn).
 DEFAULTS = {
-    "router": "qwen2.5-coder:3b",
-    "general": "qwen2.5-coder:3b",
+    "router": "qwen3:4b",
+    "general": "qwen3:4b",
     "coder": "qwen2.5-coder:3b",
     "embedder": "nomic-embed-text",
 }

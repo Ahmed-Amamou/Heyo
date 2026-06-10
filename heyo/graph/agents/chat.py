@@ -25,24 +25,16 @@ def make_chat_agent(llm: LLMClient):
             system += "\n\n# Relevant memories\n" + state["memory_context"]
         messages = [{"role": "system", "content": system}, *state["messages"][-10:]]
 
-        chunks: list[str] = []
-        thinking = False
-        async for tok in llm.stream("general", messages):
-            # Reasoning models emit a <think> block first: stream it live as
-            # "thinking" events (shown dimmed in the UI) but keep it out of the
-            # final response (and out of TTS).
-            if "<think>" in tok:
-                thinking = True
-                continue
-            if "</think>" in tok:
-                thinking = False
-                continue
-            if thinking:
-                emit(writer, "thinking", text=tok)
-                continue
-            chunks.append(tok)
-            emit(writer, "token", text=tok)
-        content = "".join(chunks).strip()
+        # Reasoning streams live as "thinking" events (dimmed in the UI), answer
+        # tokens as "token" events; neither reaches TTS until the final response.
+        content = ""
+        async for kind, data in llm.stream_message("general", messages):
+            if kind == "thinking":
+                emit(writer, "thinking", text=data)
+            elif kind == "token":
+                emit(writer, "token", text=data)
+            elif kind == "message":
+                content = data["content"]
         trace(writer, "chat", "done")
         return {
             "response": content,

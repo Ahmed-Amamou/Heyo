@@ -93,6 +93,79 @@ class LLMClient:
             )
             return _parse_json_content(msg.get("content") or "")
 
+    async def stream_message(
+        self,
+        role: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        temperature: float = 0.4,
+        think: bool = True,
+    ) -> AsyncIterator[tuple[str, Any]]:
+        """Streaming chat completion with live reasoning and tool-call assembly.
+
+        Yields ("thinking", text) for <think> block tokens, ("token", text) for
+        answer tokens, then exactly one ("message", assistant_message) with the
+        think-stripped content and any accumulated tool_calls.
+        """
+        if not think:
+            messages = [{"role": "system", "content": "/no_think"}, *messages]
+        payload: dict[str, Any] = {
+            "model": self.models.role(role).model,
+            "messages": messages,
+            "temperature": temperature,
+            "stream": True,
+        }
+        if tools:
+            payload["tools"] = tools
+        url = f"{self.models.base_url(role)}/chat/completions"
+
+        parser = _ThinkParser()
+        content_parts: list[str] = []
+        calls: dict[int, dict[str, Any]] = {}
+
+        async with self._http.stream("POST", url, json=payload) as resp:
+            if resp.status_code != 200:
+                body = await resp.aread()
+                raise LLMError(f"{url} -> {resp.status_code}: {body[:500]!r}")
+            async for line in resp.aiter_lines():
+                if not line.startswith("data:"):
+                    continue
+                data = line[5:].strip()
+                if data == "[DONE]":
+                    break
+                delta = json.loads(data)["choices"][0].get("delta", {})
+                for tc in delta.get("tool_calls") or []:
+                    idx = tc.get("index", 0)
+                    cur = calls.setdefault(
+                        idx, {"id": tc.get("id") or f"call_{idx}",
+                              "function": {"name": "", "arguments": ""}}
+                    )
+                    fn = tc.get("function", {})
+                    if fn.get("name"):
+                        cur["function"]["name"] = fn["name"]
+                    if fn.get("arguments"):
+                        cur["function"]["arguments"] += fn["arguments"]
+                # some servers expose reasoning as its own delta field
+                if delta.get("reasoning"):
+                    yield ("thinking", delta["reasoning"])
+                if delta.get("content"):
+                    for kind, text in parser.feed(delta["content"]):
+                        if kind == "token":
+                            content_parts.append(text)
+                        yield (kind, text)
+        for kind, text in parser.flush():
+            if kind == "token":
+                content_parts.append(text)
+            yield (kind, text)
+
+        message: dict[str, Any] = {"role": "assistant", "content": "".join(content_parts).strip()}
+        if calls:
+            message["tool_calls"] = [
+                {"id": c["id"], "type": "function", "function": c["function"]}
+                for _, c in sorted(calls.items())
+            ]
+        yield ("message", message)
+
     async def stream(
         self,
         role: str,
@@ -120,6 +193,60 @@ class LLMClient:
                 delta = json.loads(data)["choices"][0].get("delta", {})
                 if delta.get("content"):
                     yield delta["content"]
+
+
+class _ThinkParser:
+    """Incremental splitter of a token stream into thinking vs answer text.
+
+    Reasoning models open with a <think>...</think> block; tags can be split
+    across stream chunks, so a small holdback buffer is kept while inside one.
+    """
+
+    def __init__(self) -> None:
+        self.buf = ""
+        self.mode = "detect"  # detect -> think|token
+
+    def feed(self, text: str) -> list[tuple[str, str]]:
+        self.buf += text
+        out: list[tuple[str, str]] = []
+        while True:
+            if self.mode == "detect":
+                stripped = self.buf.lstrip()
+                if not stripped:
+                    return out
+                if stripped.startswith("<think>"):
+                    self.buf = stripped[len("<think>"):]
+                    self.mode = "think"
+                    continue
+                if "<think>".startswith(stripped):
+                    return out  # could still become a tag; wait for more
+                self.mode = "token"
+                continue
+            if self.mode == "think":
+                end = self.buf.find("</think>")
+                if end != -1:
+                    if self.buf[:end]:
+                        out.append(("thinking", self.buf[:end]))
+                    self.buf = self.buf[end + len("</think>"):].lstrip()
+                    self.mode = "token"
+                    continue
+                holdback = len("</think>") - 1
+                if len(self.buf) > holdback:
+                    out.append(("thinking", self.buf[:-holdback]))
+                    self.buf = self.buf[-holdback:]
+                return out
+            # token mode: pass everything through
+            if self.buf:
+                out.append(("token", self.buf))
+                self.buf = ""
+            return out
+
+    def flush(self) -> list[tuple[str, str]]:
+        out: list[tuple[str, str]] = []
+        if self.buf.strip():
+            out.append(("thinking" if self.mode == "think" else "token", self.buf))
+        self.buf = ""
+        return out
 
 
 def _parse_json_content(content: str) -> dict[str, Any]:

@@ -152,13 +152,23 @@ def make_tool_agent(
 
         ran_a_tool = False
         for _ in range(max_iterations):
-            # think=False: hidden reasoning adds seconds per tool round with no benefit here
-            msg = await llm.chat(role, convo, tools=toolkit.specs() or None, think=False)
+            # ReAct round, streamed live: reasoning -> "thinking" events, answer
+            # tokens -> "token" events, tool calls assembled from the same stream.
+            msg: dict[str, Any] = {}
+            streamed_answer = False
+            async for kind, data in llm.stream_message(
+                role, convo, tools=toolkit.specs() or None
+            ):
+                if kind == "thinking":
+                    emit(writer, "thinking", text=data)
+                elif kind == "token":
+                    streamed_answer = True
+                    emit(writer, "token", text=data)
+                elif kind == "message":
+                    msg = data
             tool_calls = msg.get("tool_calls") or []
             if not tool_calls:
                 content = (msg.get("content") or "").strip()
-                if "</think>" in content:
-                    content = content.split("</think>", 1)[1].strip()
                 if not ran_a_tool and force_first_tool and force_first_tool in toolkit.tools:
                     user_msg = next(
                         (m["content"] for m in reversed(state["messages"])
@@ -188,7 +198,8 @@ def make_tool_agent(
                          "Reply with the final answer for the user (or another tool call)."}
                     )
                     continue
-                emit(writer, "token", text=content)
+                if not streamed_answer:
+                    emit(writer, "token", text=content)
                 trace(writer, name, "done")
                 return {
                     "response": content,

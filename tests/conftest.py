@@ -40,6 +40,24 @@ class FakeLLM(LLMClient):
         for tok in self.stream_text.split(" "):
             yield tok + " "
 
+    async def stream_message(self, role, messages, tools=None, temperature=0.4, think=True):
+        self.calls.append({"role": role, "messages": messages, "tools": tools, "stream": True})
+        if tools:
+            msg = self.replies.pop(0) if self.replies else {"content": "done"}
+            content = (msg.get("content") or "").strip()
+            if content and not msg.get("tool_calls"):
+                for tok in content.split(" "):
+                    yield ("token", tok + " ")
+            out = {"role": "assistant", "content": content}
+            if msg.get("tool_calls"):
+                out["tool_calls"] = msg["tool_calls"]
+            yield ("message", out)
+        else:
+            yield ("thinking", "let me think ")
+            for tok in self.stream_text.split(" "):
+                yield ("token", tok + " ")
+            yield ("message", {"role": "assistant", "content": self.stream_text})
+
 
 @pytest.fixture
 def workspace(tmp_path):
