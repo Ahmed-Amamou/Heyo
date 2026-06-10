@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HEYO // local agentic console</title>
+<style>
+:root{
+  --bg:#070907;
+  --bg2:#0b0e0b;
+  --panel:#0d120d;
+  --line:#1c241c;
+  --txt:#c8d6c2;
+  --dim:#5d6f5d;
+  --amber:#ffb454;
+  --green:#7df9aa;
+  --red:#ff6b6b;
+  --mono:ui-monospace,"Cascadia Code","JetBrains Mono","Fira Code",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:var(--bg);color:var(--txt);font-family:var(--mono);font-size:14px;
+  overflow:hidden;
+}
+/* CRT atmosphere: scanlines + vignette + slow flicker */
+body::before{
+  content:"";position:fixed;inset:0;pointer-events:none;z-index:9;
+  background:repeating-linear-gradient(0deg,transparent 0 2px,rgba(0,0,0,.18) 2px 3px);
+}
+body::after{
+  content:"";position:fixed;inset:0;pointer-events:none;z-index:10;
+  background:radial-gradient(ellipse at center,transparent 55%,rgba(0,0,0,.55));
+  animation:flicker 7s infinite;
+}
+@keyframes flicker{
+  0%,100%{opacity:1} 92%{opacity:1} 93%{opacity:.86} 94%{opacity:1} 97%{opacity:.93} 98%{opacity:1}
+}
+
+.app{display:grid;grid-template-columns:330px 1fr;grid-template-rows:52px 1fr;height:100vh}
+
+/* ---------- header ---------- */
+header{
+  grid-column:1/3;display:flex;align-items:center;gap:14px;padding:0 18px;
+  border-bottom:1px solid var(--line);background:linear-gradient(180deg,var(--bg2),var(--bg));
+}
+.logo{font-size:19px;letter-spacing:.35em;color:var(--amber);text-shadow:0 0 12px rgba(255,180,84,.5)}
+.logo b{color:var(--green);text-shadow:0 0 12px rgba(125,249,170,.5)}
+.tagline{color:var(--dim);font-size:11px;letter-spacing:.12em;text-transform:uppercase}
+.spacer{flex:1}
+.stat{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--dim);letter-spacing:.08em}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--dim)}
+.dot.ok{background:var(--green);box-shadow:0 0 8px var(--green);animation:pulse 2.4s infinite}
+.dot.err{background:var(--red);box-shadow:0 0 8px var(--red)}
+@keyframes pulse{50%{opacity:.45}}
+
+/* ---------- pipeline panel ---------- */
+.pipe{
+  border-right:1px solid var(--line);background:var(--panel);
+  display:flex;flex-direction:column;overflow:hidden;
+}
+.pipe h2,.chatHead{
+  font-size:10px;letter-spacing:.3em;color:var(--dim);text-transform:uppercase;
+  padding:12px 16px 8px;border-bottom:1px solid var(--line)
+}
+.nodes{padding:14px 16px 6px;position:relative}
+.node{
+  position:relative;display:flex;align-items:center;gap:10px;
+  padding:7px 10px;margin-bottom:4px;border:1px solid var(--line);
+  border-radius:2px;color:var(--dim);transition:all .25s;background:var(--bg2);
+}
+.node .led{width:8px;height:8px;border-radius:50%;background:#222a22;flex:none;transition:all .2s}
+.node .nm{letter-spacing:.14em;font-size:12px;text-transform:uppercase}
+.node .meta{margin-left:auto;font-size:10px;color:var(--dim);max-width:140px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.node.active{color:var(--amber);border-color:rgba(255,180,84,.6);
+  box-shadow:0 0 14px rgba(255,180,84,.12),inset 0 0 14px rgba(255,180,84,.05)}
+.node.active .led{background:var(--amber);box-shadow:0 0 10px var(--amber);animation:pulse 1s infinite}
+.node.done{color:var(--green);border-color:rgba(125,249,170,.35)}
+.node.done .led{background:var(--green);box-shadow:0 0 6px var(--green)}
+.node.skip{opacity:.35}
+.agents{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin:0 0 4px 22px}
+.agents .node{margin-bottom:0;padding:6px 8px}
+.wire{margin-left:22px;border-left:1px dashed var(--line);height:8px}
+.rationale{
+  margin:2px 0 8px 22px;padding:6px 9px;font-size:11px;color:var(--amber);
+  border-left:2px solid var(--amber);background:rgba(255,180,84,.05);display:none
+}
+.rationale.show{display:block;animation:slide .25s}
+@keyframes slide{from{opacity:0;transform:translateY(-4px)}}
+
+/* ---------- raw trace feed ---------- */
+.feedWrap{flex:1;display:flex;flex-direction:column;overflow:hidden;border-top:1px solid var(--line)}
+.feedWrap h2{border-bottom:1px solid var(--line)}
+.feed{flex:1;overflow-y:auto;padding:8px 14px;font-size:11px;line-height:1.7}
+.feed div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.feed .t{color:var(--dim)}
+.feed .n{color:var(--amber)}
+.feed .tool{color:var(--green)}
+.feed .err{color:var(--red)}
+
+/* ---------- chat ---------- */
+.chat{display:flex;flex-direction:column;overflow:hidden;background:
+  linear-gradient(rgba(125,249,170,.012) 1px,transparent 1px) 0 0/100% 28px}
+.msgs{flex:1;overflow-y:auto;padding:26px 9% 20px}
+.msg{margin-bottom:22px;animation:slide .2s}
+.msg .who{font-size:10px;letter-spacing:.28em;text-transform:uppercase;margin-bottom:6px}
+.msg.user .who{color:var(--dim)}
+.msg.bot .who{color:var(--amber)}
+.msg .body{white-space:pre-wrap;line-height:1.75}
+.msg.user .body{color:#9fb39a;border-left:2px solid var(--line);padding-left:12px}
+.msg.bot .body{color:var(--txt);text-shadow:0 0 6px rgba(200,214,194,.12)}
+.cursor::after{content:"▋";color:var(--green);animation:pulse .8s infinite}
+.hello{color:var(--dim);text-align:center;margin-top:14vh;line-height:2.2;letter-spacing:.06em}
+.hello .big{font-size:30px;color:var(--amber);letter-spacing:.45em;
+  text-shadow:0 0 18px rgba(255,180,84,.4)}
+.hello kbd{border:1px solid var(--line);padding:1px 7px;border-radius:2px;color:var(--green)}
+
+/* ---------- composer ---------- */
+form{display:flex;gap:0;border-top:1px solid var(--line);background:var(--bg2)}
+.prompt{color:var(--green);padding:16px 0 16px 18px;text-shadow:0 0 8px rgba(125,249,170,.4)}
+input{
+  flex:1;background:transparent;border:0;outline:0;color:var(--txt);
+  font:inherit;padding:16px 12px;letter-spacing:.02em;caret-color:var(--green)
+}
+input::placeholder{color:#3c483c}
+button{
+  background:transparent;border:0;border-left:1px solid var(--line);color:var(--amber);
+  font:inherit;font-size:11px;letter-spacing:.25em;padding:0 26px;cursor:pointer;
+  text-transform:uppercase;transition:all .2s
+}
+button:hover{background:rgba(255,180,84,.08);text-shadow:0 0 10px var(--amber)}
+button:disabled{color:var(--dim);cursor:wait}
+::-webkit-scrollbar{width:8px}
+::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="logo">HEY<b>O</b></div>
+    <div class="tagline">local agentic console — multi-LLM · langgraph · 100% on-prem</div>
+    <div class="spacer"></div>
+    <div class="stat"><span class="dot" id="apiDot"></span><span id="apiTxt">API</span></div>
+    <div class="stat"><span id="modelTxt"></span></div>
+  </header>
+
+  <aside class="pipe">
+    <h2>Pipeline</h2>
+    <div class="nodes" id="nodes">
+      <div class="node" data-node="prepare"><span class="led"></span><span class="nm">prepare</span><span class="meta"></span></div>
+      <div class="wire"></div>
+      <div class="node" data-node="router"><span class="led"></span><span class="nm">router</span><span class="meta"></span></div>
+      <div class="rationale" id="rationale"></div>
+      <div class="agents">
+        <div class="node" data-node="chat"><span class="led"></span><span class="nm">chat</span></div>
+        <div class="node" data-node="files"><span class="led"></span><span class="nm">files</span></div>
+        <div class="node" data-node="web"><span class="led"></span><span class="nm">web</span></div>
+        <div class="node" data-node="apps"><span class="led"></span><span class="nm">apps</span></div>
+        <div class="node" data-node="mcp"><span class="led"></span><span class="nm">mcp</span></div>
+      </div>
+      <div class="wire"></div>
+      <div class="node" data-node="finalize"><span class="led"></span><span class="nm">finalize</span><span class="meta"></span></div>
+    </div>
+    <div class="feedWrap">
+      <h2>Trace feed</h2>
+      <div class="feed" id="feed"></div>
+    </div>
+  </aside>
+
+  <main class="chat">
+    <div class="msgs" id="msgs">
+      <div class="hello" id="hello">
+        <div class="big">HEYO</div>
+        say <kbd>heyo</kbd> near the mic — or type below<br>
+        every request is routed live through the agent graph ⟵
+      </div>
+    </div>
+    <form id="form">
+      <span class="prompt">&gt;_</span>
+      <input id="input" placeholder="ask anything · create files · open apps · browse · mcp tools" autocomplete="off" autofocus>
+      <button id="send">send</button>
+    </form>
+  </main>
+</div>
+
+<script>
+const $=s=>document.querySelector(s);
+const msgs=$("#msgs"),feed=$("#feed"),form=$("#form"),input=$("#input"),send=$("#send");
+let sessionId=null;
+
+/* ---- health probe ---- */
+(async()=>{
+  try{
+    const r=await fetch("/health");const h=await r.json();
+    $("#apiDot").className="dot ok";
+    $("#modelTxt").textContent=Object.values(h.roles||{}).filter((v,i,a)=>a.indexOf(v)===i).join(" · ");
+  }catch{ $("#apiDot").className="dot err";$("#apiTxt").textContent="API OFFLINE";}
+})();
+
+/* ---- pipeline visualization ---- */
+const AGENTS=["chat","files","web","apps","mcp"];
+function resetPipe(){
+  document.querySelectorAll(".node").forEach(n=>{n.className="node";n.querySelector(".meta")&&(n.querySelector(".meta").textContent="")});
+  $("#rationale").className="rationale";
+}
+function setNode(name,cls,meta){
+  const el=document.querySelector(`.node[data-node="${name}"]`);if(!el)return;
+  el.className="node "+cls;
+  const m=el.querySelector(".meta");if(m&&meta)m.textContent=meta;
+}
+function onTrace(ev){
+  const{node,status}=ev;
+  if(status==="start")setNode(node,"active");
+  if(status==="done"){
+    setNode(node,"done");
+    if(node==="router"&&ev.route){
+      AGENTS.forEach(a=>{if(a!==ev.route)setNode(a,"skip")});
+      setNode(ev.route,"active");
+      if(ev.rationale){const r=$("#rationale");r.textContent="» "+ev.rationale;r.className="rationale show";}
+    }
+  }
+  if(status==="tool")setNode(node,"active",ev.tool);
+  logFeed(ev);
+}
+function logFeed(ev){
+  const d=document.createElement("div");
+  const t=new Date((ev.ts||Date.now()/1e3)*1e3).toLocaleTimeString("en-GB");
+  let detail=ev.status;
+  if(ev.status==="tool")detail=`⚙ ${ev.tool} ${ev.args||""}`;
+  if(ev.status==="tool_result")detail=`⮑ ${(ev.result||"").slice(0,60)}`;
+  if(ev.route)detail+=` → ${ev.route}`;
+  if(ev.error)detail=`✗ ${ev.error}`;
+  d.innerHTML=`<span class="t">${t}</span> <span class="n">${ev.node}</span> <span class="${ev.error?"err":ev.status.startsWith("tool")?"tool":"t"}">${esc(detail)}</span>`;
+  feed.appendChild(d);feed.scrollTop=feed.scrollHeight;
+}
+const esc=s=>String(s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+
+/* ---- chat ---- */
+function addMsg(who,text){
+  $("#hello")?.remove();
+  const d=document.createElement("div");
+  d.className="msg "+who;
+  d.innerHTML=`<div class="who">${who==="user"?"you":"heyo"}</div><div class="body"></div>`;
+  d.querySelector(".body").textContent=text;
+  msgs.appendChild(d);msgs.scrollTop=msgs.scrollHeight;
+  return d.querySelector(".body");
+}
+
+form.addEventListener("submit",async e=>{
+  e.preventDefault();
+  const text=input.value.trim();if(!text)return;
+  input.value="";send.disabled=true;resetPipe();
+  addMsg("user",text);
+  const body=addMsg("bot","");body.classList.add("cursor");
+  let acc="";
+  try{
+    const resp=await fetch("/chat",{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({message:text,session_id:sessionId})});
+    if(!resp.ok)throw new Error("HTTP "+resp.status);
+    const reader=resp.body.getReader(),dec=new TextDecoder();
+    let buf="",event=null;
+    for(;;){
+      const{done,value}=await reader.read();if(done)break;
+      buf+=dec.decode(value,{stream:true});
+      const lines=buf.split("\n");buf=lines.pop();
+      for(const line of lines){
+        if(line.startsWith("event:"))event=line.slice(6).trim();
+        else if(line.startsWith("data:")){
+          const data=JSON.parse(line.slice(5));
+          if(event==="trace")onTrace(data);
+          else if(event==="token"){acc+=data.text;body.textContent=acc;msgs.scrollTop=msgs.scrollHeight;}
+          else if(event==="done"){sessionId=data.session_id;if(data.response)body.textContent=data.response;}
+          else if(event==="error"){body.textContent=acc+"\n✗ "+data.detail;body.classList.add("err");}
+        }
+      }
+    }
+  }catch(err){body.textContent="✗ "+err.message;}
+  body.classList.remove("cursor");send.disabled=false;input.focus();
+});
+</script>
+</body>
+</html>
