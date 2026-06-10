@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from heyo.graph.state import AgentState, trace
@@ -13,8 +14,21 @@ Pick the single best agent for the user's request:
 
 {agent_descriptions}
 
+Rules:
+- Anything needing current/live information (news, weather, prices, versions,
+  "search", "look up") -> "web"
+- Operations on files or folders -> "files"
+- Launching/opening applications or programs -> "apps"
 Consider the conversation history. Default to "chat" when no specialized agent fits.
 """
+
+# Deterministic shortcuts: when the user is explicit, don't burn an LLM call
+# (and don't risk LLM routing variance). Conservative patterns only.
+FAST_ROUTES: list[tuple[str, str]] = [
+    (r"\b(search|google|look\s*up|browse)\b|https?://|\bwebsite\b", "web"),
+    (r"\b(open|launch|start)\b.{0,40}\b(app|application|calculator|notepad|browser|program)\b",
+     "apps"),
+]
 
 
 def route_schema(agent_names: list[str]) -> dict[str, Any]:
@@ -36,6 +50,12 @@ def make_router_node(llm: LLMClient, agents: dict[str, str]):
 
     async def router_node(state: AgentState, *, writer=None) -> AgentState:
         trace(writer, "router", "start")
+        last = state["messages"][-1]["content"].lower()
+        for pattern, fast_route in FAST_ROUTES:
+            if fast_route in agents and re.search(pattern, last):
+                trace(writer, "router", "done", route=fast_route,
+                      rationale=f"explicit {fast_route} request (fast-path)")
+                return {"route": fast_route, "rationale": "explicit request (fast-path)"}
         messages = [{"role": "system", "content": system}, *state["messages"][-4:]]
         try:
             result = await llm.chat_structured("router", messages, schema, think=False)

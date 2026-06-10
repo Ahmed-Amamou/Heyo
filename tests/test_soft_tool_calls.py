@@ -27,6 +27,29 @@ def test_parses_bare_json_with_tool_key():
     assert parse_soft_tool_call(content, make_kit()) == ("write_file", {"path": "b.txt"})
 
 
+def test_multiple_json_objects_takes_first_valid():
+    content = ('{"name": "goto", "arguments": {"url": "https://x.com"}}\n'
+               '{"name": "read_page", "arguments": {}}')
+    kit = ToolKit()
+
+    @kit.add("goto", "nav", {"type": "object", "properties": {}})
+    def goto(url: str) -> str:
+        return "ok"
+
+    @kit.add("read_page", "read", {"type": "object", "properties": {}})
+    def read_page() -> str:
+        return "ok"
+
+    assert parse_soft_tool_call(content, kit) == ("goto", {"url": "https://x.com"})
+
+
+def test_unwraps_schema_shaped_arguments():
+    content = '{"name": "write_file", "arguments": {"path": {"type": "string", "value": "a.txt"}, "content": "x"}}'
+    assert parse_soft_tool_call(content, make_kit()) == (
+        "write_file", {"path": "a.txt", "content": "x"}
+    )
+
+
 def test_ignores_plain_text_and_unknown_tools():
     kit = make_kit()
     assert parse_soft_tool_call("I created the file for you.", kit) is None
