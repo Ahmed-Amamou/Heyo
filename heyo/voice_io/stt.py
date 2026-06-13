@@ -23,6 +23,41 @@ log = logging.getLogger("heyo")
 LOCAL_WHISPER = Path.home() / ".heyo" / "whisper-small"
 
 
+_cuda_preloaded = False
+
+
+def _preload_cuda_libs() -> None:
+    """Make the GPU work no matter how the server was launched (no reliance on
+    LD_LIBRARY_PATH): dlopen the CUDA math libs with RTLD_GLOBAL so CTranslate2's
+    later dlopen-by-soname resolves to the already-loaded copy. Ollama bundles
+    libcublas/libcudart for CUDA 12; the nvidia-*-cu12 wheels are used too if
+    installed. Loaded deps-first; silent no-op when nothing is found (→ CPU)."""
+    global _cuda_preloaded
+    if _cuda_preloaded:
+        return
+    _cuda_preloaded = True
+    import ctypes
+    import glob
+    import sys
+
+    dirs = ["/usr/local/lib/ollama/cuda_v12",
+            *glob.glob(f"{sys.prefix}/lib/python*/site-packages/nvidia/*/lib")]
+    loaded = []
+    for soname in ("libcudart.so.12", "libcublasLt.so.12", "libcublas.so.12", "libcudnn.so.9"):
+        for d in dirs:
+            hits = glob.glob(f"{d}/{soname}*")
+            if not hits:
+                continue
+            try:
+                ctypes.CDLL(hits[0], mode=ctypes.RTLD_GLOBAL)
+                loaded.append(soname)
+            except OSError as exc:
+                log.debug("preload %s failed: %s", hits[0], exc)
+            break
+    if loaded:
+        log.info("preloaded CUDA libs for STT: %s", ", ".join(loaded))
+
+
 def _resolve_model(model_size: str | None) -> str:
     if model_size:
         return model_size
@@ -89,6 +124,8 @@ class WhisperTranscriber:
         import numpy as np
 
         devices = ["cuda", "cpu"] if device == "auto" else [device]
+        if "cuda" in devices:
+            _preload_cuda_libs()  # so the GPU works without LD_LIBRARY_PATH
         # Offline first: a cached model must never phone home to check HF for
         # updates — on a throttled-HF link that call HANGS the whole load. Only
         # attempt an online (downloading) load when explicitly asked.
