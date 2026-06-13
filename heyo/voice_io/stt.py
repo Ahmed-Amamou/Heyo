@@ -14,8 +14,24 @@ import io
 import json
 import logging
 import os
+from pathlib import Path
 
 log = logging.getLogger("heyo")
+
+# A manually-placed CT2 model lands here (HuggingFace is often throttled, so the
+# weights get fetched out-of-band); used automatically when present.
+LOCAL_WHISPER = Path.home() / ".heyo" / "whisper-small"
+
+
+def _resolve_model(model_size: str | None) -> str:
+    if model_size:
+        return model_size
+    env = os.getenv("HEYO_STT_MODEL")
+    if env:
+        return env
+    if (LOCAL_WHISPER / "model.bin").exists():
+        return str(LOCAL_WHISPER)
+    return "small"
 
 
 def make_transcriber():
@@ -56,41 +72,52 @@ class WhisperTranscriber:
                  allow_download: bool = False):
         from faster_whisper import WhisperModel
 
-        model_size = model_size or os.getenv("HEYO_STT_MODEL", "small")
+        model_size = _resolve_model(model_size)
         # Prefer the GPU: transcription finishes before the LLM starts generating,
         # so they never compute at once; small-int8_float16 (~0.5GB) sits beside
-        # the resident LLM and is much faster than CPU. Falls back to CPU if CUDA
-        # isn't usable. HEYO_STT_DEVICE forces cpu/cuda.
+        # the resident LLM and is much faster than CPU. Falls back to CPU if the
+        # CUDA libs aren't usable. HEYO_STT_DEVICE forces cpu/cuda.
         device = device or os.getenv("HEYO_STT_DEVICE", "auto")
         self.language = os.getenv("HEYO_STT_LANGUAGE") or None
+        # beam_size=1 is ~2x faster than the default 5 with no accuracy loss on
+        # short commands — the difference between ~5s and ~2.5s on CPU.
+        self.beam_size = int(os.getenv("HEYO_STT_BEAM", "1"))
         self.model = self._load(WhisperModel, model_size, device, allow_download)
 
     @staticmethod
     def _load(WhisperModel, model_size: str, device: str, allow_download: bool):
+        import numpy as np
+
         devices = ["cuda", "cpu"] if device == "auto" else [device]
         # Offline first: a cached model must never phone home to check HF for
         # updates — on a throttled-HF link that call HANGS the whole load. Only
-        # attempt an online (downloading) load when explicitly asked. With no
-        # network, a missing-CUDA/cuDNN error raises fast -> CPU, never hangs.
+        # attempt an online (downloading) load when explicitly asked.
         passes = (True, False) if allow_download else (True,)
+        # A GPU can *load* the model yet fail at inference for missing CUDA math
+        # libs (libcublas/libcudnn) — so we don't trust a device until a tiny
+        # warm-up run actually executes on it; otherwise fall through to CPU.
+        warmup = (np.random.randn(16000) * 1e-3).astype(np.float32)
         last: Exception | None = None
         for local_only in passes:
             for dev in devices:
                 compute = "int8" if dev == "cpu" else "int8_float16"
                 try:
                     m = WhisperModel(model_size, device=dev, compute_type=compute,
+                                     cpu_threads=os.cpu_count() or 4,
                                      local_files_only=local_only)
+                    list(m.transcribe(warmup, language="en", vad_filter=False, beam_size=1)[0])
                     log.info("faster-whisper %s on %s (%s%s)", model_size, dev, compute,
                              "" if local_only else ", downloaded")
                     return m
-                except Exception as exc:  # no CUDA/cuDNN, not cached, OOM, ...
+                except Exception as exc:  # not cached, no CUDA libs, OOM, ...
                     last = exc
-                    log.warning("faster-whisper %s on %s failed (%s)", model_size, dev, exc)
+                    log.warning("faster-whisper %s on %s unusable (%s)", model_size, dev, exc)
         raise RuntimeError(f"faster-whisper {model_size} unavailable: {last}")
 
     def transcribe(self, audio: bytes) -> str:
         segments, _ = self.model.transcribe(
-            io.BytesIO(audio), language=self.language, vad_filter=True
+            io.BytesIO(audio), language=self.language,
+            beam_size=self.beam_size, vad_filter=True,
         )
         return " ".join(seg.text.strip() for seg in segments).strip()
 
