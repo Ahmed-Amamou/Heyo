@@ -56,3 +56,22 @@ async def test_chat_endpoint_streams_sse(workspace):
     # session history retained for follow-ups
     hist = app.state.sessions.history(done["session_id"])
     assert [m["role"] for m in hist] == ["user", "assistant"]
+
+
+async def test_voice_flag_style_hint_is_not_persisted(workspace):
+    app = make_test_app(workspace)
+    async with LifespanManager(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as client:
+            sid, event = None, None
+            async with client.stream(
+                "POST", "/chat", json={"message": "hi", "voice": True}
+            ) as resp:
+                assert resp.status_code == 200
+                async for line in resp.aiter_lines():
+                    if line.startswith("event:"):
+                        event = line.split(":", 1)[1].strip()
+                    elif line.startswith("data:") and event == "done":
+                        sid = json.loads(line.split(":", 1)[1])["session_id"]
+    hist = app.state.sessions.history(sid)
+    assert all(m["role"] != "system" for m in hist)

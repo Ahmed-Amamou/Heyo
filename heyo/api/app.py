@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse
 from heyo import __version__
 from heyo.api.chat import router as chat_router
 from heyo.api.sessions import SessionStore
+from heyo.api.voice import router as voice_router
 from heyo.config import get_settings
 from heyo.graph.agents import apps as apps_agent
 from heyo.graph.agents import mcp as mcp_agent
@@ -75,6 +76,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(title="Heyo", version=__version__, lifespan=lifespan)
     app.include_router(chat_router)
+    app.include_router(voice_router)
 
     @app.get("/health")
     async def health():

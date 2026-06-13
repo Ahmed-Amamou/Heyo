@@ -6,9 +6,10 @@ entirely on your machine: local models (Ollama / vLLM), local memory (Qdrant), l
 voice (openWakeWord / faster-whisper / Piper), and your own MCP servers.
 
 ```
- voice client                     FastAPI server
- "Heyo" → wake → STT ──HTTP──▶  POST /chat (SSE: trace/token/done)
- ◀─ Piper TTS (spoken reply)     web console at / (chat + live agent trace)
+ voice client (Windows-native     FastAPI server
+ or Linux — mic+speaker only)     /voice/transcribe (Whisper) · /voice/speak (Piper)
+ "Heyo" / ctrl+alt+h ──HTTP──▶   POST /chat (SSE: trace/thinking/token/done)
+ ◀── spoken reply                 web console at / (chat + inline run-chain + mic)
                                           │
                                  LangGraph StateGraph
                        prepare ─▶ router (structured routing)
@@ -38,10 +39,15 @@ voice (openWakeWord / faster-whisper / Piper), and your own MCP servers.
   similarity on later requests, across sessions.
 - **MCP integration** — declare your servers in `mcp.json` (claude-desktop schema,
   stdio or HTTP); their tools are exposed to a dedicated agent via FastMCP.
-- **Voice** — always-listening wake word, offline STT/TTS, runs in WSL2 or natively on
-  Windows. See [apps/voice/README.md](apps/voice/README.md).
-- **Live agent trace** — the web console visualizes the graph in real time: nodes light
-  up, router rationale and tool calls stream in as SSE events.
+- **Voice, seamless from Windows** — say *"Heyo"* anywhere (or hit a global hotkey):
+  STT/TTS run server-side (`/voice/transcribe`, `/voice/speak`), so the always-listening
+  client is one file with four small deps that runs natively on Windows while the brain
+  stays in WSL. Barge-in, login autostart, browser mic too.
+  See [apps/voice/README.md](apps/voice/README.md).
+- **A console that shows the agent working** — minimalist web UI: just the name up top
+  (the "o" is a status orb tinted by whichever agent is active), and every reply carries
+  its own inline run-chain — route → live-streamed thinking → tool calls → answer —
+  folding into a one-line summary when done.
 
 ## Quick start
 
@@ -52,13 +58,16 @@ docker compose up -d qdrant           # vector store (memory + skills)
 uv run heyo-api                       # server + web console on http://localhost:8000
 ```
 
-Voice (optional):
+Voice (optional). Server side, one-time: `uv sync --extra voice`. Then the client —
+**from Windows** (recommended: native mic + global hotkey, WSL forwards localhost):
 
-```bash
-sudo apt install -y libportaudio2
-uv sync --extra voice
-uv run python -m apps.voice.main
+```powershell
+cd \\wsl.localhost\Ubuntu\home\<you>\Heyo\apps\voice
+powershell -ExecutionPolicy Bypass -File setup.ps1 -Startup   # say "Heyo" or ctrl+alt+h
 ```
+
+or inside Linux/WSL: `sudo apt install -y libportaudio2 && uv sync --extra voice-client
+&& uv run python apps/voice/client.py`
 
 Web agent (optional): `uv sync --extra web && uv run playwright install chromium`
 
@@ -120,10 +129,10 @@ docker compose --profile full up --build      # run the API in Docker too
 ### Repo map
 
 ```
-heyo/        server: config, llm client, graph (router/agents), memory, skills, api
-apps/voice/  standalone voice client (wake/STT/TTS)
+heyo/        server: config, llm client, graph (router/agents), memory, skills, api, voice_io
+apps/voice/  thin voice client (wake word + hotkey + mic/speaker) + Windows setup.ps1
 ui/          single-file web console (no build step)
-skills/      taught .md skills        scripts/   setup + model-fit
+skills/      taught .md skills        scripts/   setup + model-fit + wake-word bench
 ```
 
 ## Hardware notes

@@ -15,6 +15,13 @@ router = APIRouter()
 class ChatRequest(BaseModel):
     message: str
     session_id: str | None = None
+    voice: bool = False  # spoken session: bias agents toward short, readable-aloud answers
+
+
+VOICE_STYLE = (
+    "Voice session: the user spoke this and will hear your answer read aloud. "
+    "Answer in short plain sentences — no markdown, no lists, no code blocks."
+)
 
 
 @router.post("/chat")
@@ -24,10 +31,11 @@ async def chat(req: ChatRequest, request: Request):
     session_id = req.session_id or str(uuid.uuid4())
 
     sessions.append(session_id, {"role": "user", "content": req.message})
-    state = {
-        "session_id": session_id,
-        "messages": list(sessions.history(session_id)),
-    }
+    messages = list(sessions.history(session_id))
+    if req.voice:
+        # transient style hint — not persisted, so typed follow-ups aren't affected
+        messages.append({"role": "system", "content": VOICE_STYLE})
+    state = {"session_id": session_id, "messages": messages}
 
     async def events():
         final_response = ""
