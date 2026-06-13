@@ -11,7 +11,12 @@ from pathlib import Path
 
 import httpx
 
-HF_BASE = "https://huggingface.co/rhasspy/piper-voices/resolve/main"
+# HuggingFace can be throttled on some links; HEYO_PIPER_BASE_URL points the
+# downloader at any mirror with the same layout (e.g. https://hf-mirror.com/...).
+# Already have the .onnx + .onnx.json in the voice dir? They're used as-is, no fetch.
+HF_BASE = os.getenv(
+    "HEYO_PIPER_BASE_URL", "https://huggingface.co/rhasspy/piper-voices/resolve/main"
+).rstrip("/")
 log = logging.getLogger("heyo")
 
 

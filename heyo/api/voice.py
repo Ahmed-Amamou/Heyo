@@ -24,10 +24,10 @@ _lock = asyncio.Lock()  # one transcription/synthesis at a time — voice is sin
 def _load_stt():
     global _stt
     if _stt is None:
-        from heyo.voice_io.stt import Transcriber
+        from heyo.voice_io.stt import make_transcriber
 
-        log.info("loading faster-whisper (first /voice/transcribe)")
-        _stt = Transcriber()
+        log.info("loading speech-to-text (first /voice/transcribe)")
+        _stt = make_transcriber()
     return _stt
 
 

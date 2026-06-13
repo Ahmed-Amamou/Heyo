@@ -62,6 +62,7 @@ Pick one with `--wake vosk|oww|off`; `auto` tries vosk, then oww.
 | — | `HEYO_GREETING` | `Yes sir, what can I do for you?` | wake response |
 
 Server-side voice knobs (set where the API runs): `HEYO_STT_MODEL` (whisper size,
-default `small`), `HEYO_STT_DEVICE` (`cpu` default — the LLM owns the GPU),
-`HEYO_STT_LANGUAGE` (default auto), `HEYO_PIPER_VOICE` (default
-`en_US-lessac-medium`, auto-downloaded).
+default `small`), `HEYO_STT_DEVICE` (`auto` — GPU if usable, else CPU; transcription
+runs before the LLM generates, so they don't compete), `HEYO_STT_LANGUAGE` (default
+auto), `HEYO_PIPER_VOICE` (default `en_US-lessac-medium`, auto-downloaded — set
+`HEYO_PIPER_BASE_URL` to a mirror if HuggingFace is throttled on your link).

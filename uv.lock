@@ -917,8 +917,10 @@ dev = [
     { name = "ruff" },
 ]
 voice = [
+    { name = "av" },
     { name = "faster-whisper" },
     { name = "piper-tts" },
+    { name = "vosk" },
 ]
 voice-client = [
     { name = "httpx" },
@@ -938,6 +940,7 @@ web = [
 [package.metadata]
 requires-dist = [
     { name = "asgi-lifespan", marker = "extra == 'dev'", specifier = ">=2.1" },
+    { name = "av", marker = "extra == 'voice'", specifier = ">=11" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "faster-whisper", marker = "extra == 'voice'", specifier = ">=1.0" },
     { name = "fastmcp", specifier = ">=2.0" },
@@ -962,6 +965,7 @@ requires-dist = [
     { name = "sounddevice", marker = "extra == 'voice-client'", specifier = ">=0.5" },
     { name = "sse-starlette", specifier = ">=2.1" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
+    { name = "vosk", marker = "extra == 'voice'", specifier = ">=0.3.44" },
     { name = "vosk", marker = "extra == 'voice-client'", specifier = ">=0.3.44" },
 ]
 provides-extras = ["web", "voice", "voice-client", "dev"]
