@@ -31,7 +31,11 @@ from pathlib import Path
 
 import httpx
 import numpy as np
-import sounddevice as sd
+
+try:
+    import sounddevice as sd
+except OSError:  # PortAudio missing (e.g. WSL without libportaudio2) — mic I/O
+    sd = None    # is unavailable, but wake engines + helpers still import fine
 
 RATE = 16000
 FRAME = 1280  # 80 ms — what openWakeWord expects; vosk takes anything
@@ -51,8 +55,8 @@ class VoskWake:
     "heyo" isn't an English word, so the grammar pins the recognizer to a few
     tokens and we match the spoken form: "hey yo" / "hey oh"."""
 
-    GRAMMAR = ["hey", "yo", "oh", "you", "hello", "they", "a", "[unk]"]
-    PATTERN = re.compile(r"\bhey\s+(yo|oh)\b")
+    GRAMMAR = ["hey", "yo", "oh", "hey yo", "hey oh", "you", "hello", "they", "a", "[unk]"]
+    PATTERN = re.compile(r"\bhey[\s-]*(yo|oh)\b")
     name = 'vosk — listening for "heyo"'
 
     def __init__(self):
@@ -60,20 +64,28 @@ class VoskWake:
 
         SetLogLevel(-1)
         self.rec = KaldiRecognizer(Model(lang="en-us"), RATE, json.dumps(self.GRAMMAR))
+        self.tail = ""  # rolling window of recent finalized words
 
     def feed(self, frame: np.ndarray) -> bool:
+        # "Heyo" decodes to the tokens "hey" + "yo", which vosk's silence
+        # endpointing often splits across results — so match over a rolling window
+        # of recent finals plus the live partial, not within one frame. Spotting a
+        # coined word this way is approximate (the global hotkey is the reliable
+        # trigger; a trained openWakeWord model is the robust voice path).
         if self.rec.AcceptWaveform(frame.tobytes()):
-            return bool(self.PATTERN.search(json.loads(self.rec.Result()).get("text", "")))
-        partial = json.loads(self.rec.PartialResult()).get("partial", "")
-        if self.PATTERN.search(partial):
-            self.rec.Reset()
+            self.tail = f"{self.tail} {json.loads(self.rec.Result()).get('text', '')}".strip()[-40:]
+            hay = self.tail
+        else:
+            partial = json.loads(self.rec.PartialResult()).get("partial", "")
+            hay = f"{self.tail} {partial}".strip()
+        if self.PATTERN.search(hay):
+            self.reset()
             return True
-        if len(partial.split()) > 8:  # don't let stale context pile up
-            self.rec.Reset()
         return False
 
     def reset(self) -> None:
         self.rec.Reset()
+        self.tail = ""
 
 
 class OwwWake:
@@ -311,6 +323,11 @@ def main(argv=None) -> None:
     if os.name == "nt":
         os.system("")  # enable ANSI colors in the Windows console
     args = parse_args(argv)
+    if sd is None:
+        print("[heyo] microphone backend unavailable: PortAudio not found.\n"
+              "       Linux/WSL: sudo apt install -y libportaudio2\n"
+              "       (On Windows the sounddevice wheel bundles PortAudio — no install needed.)")
+        return
     if args.list_devices:
         print(sd.query_devices())
         return
