@@ -30,7 +30,7 @@ async def test_chat_route_streams_tokens(workspace):
     graph = build_graph(llm, make_settings(workspace))
     events, final = await run_graph(graph, "hello")
 
-    routes = [e for e in events if e.get("node") == "router" and e.get("status") == "done"]
+    routes = [e for e in events if e.get("node") == "planner" and e.get("status") == "done"]
     assert routes and routes[0]["route"] == "chat"
     tokens = "".join(e["text"] for e in events if e["type"] == "token")
     assert "hi there" in tokens
@@ -77,10 +77,42 @@ async def test_files_tool_sandbox_blocks_escape(workspace):
     assert results and "error" in results[0]["result"]
 
 
-async def test_router_bad_output_defaults_to_chat(workspace):
+async def test_planner_bad_agent_defaults_to_chat(workspace):
     llm = FakeLLM(route_to="nonexistent_agent")
     graph = build_graph(llm, make_settings(workspace))
     events, final = await run_graph(graph, "hello")
-    routes = [e for e in events if e.get("node") == "router" and e.get("status") == "done"]
-    assert routes[0]["route"] == "chat"
+    routes = [e for e in events if e.get("node") == "planner" and e.get("status") == "done"]
+    assert routes[0]["route"] == "chat"  # unknown agent normalized to chat
     assert final["response"]
+
+
+async def test_multi_step_plan_runs_agents_in_order(workspace):
+    write_call = {
+        "content": None,
+        "tool_calls": [{
+            "id": "1",
+            "function": {
+                "name": "write_file",
+                "arguments": json.dumps({"path": "notes.txt", "content": "hello"}),
+            },
+        }],
+    }
+    # plan: a files step, then a chat step that reports back (the final answer)
+    llm = FakeLLM(
+        plan=[
+            {"agent": "files", "task": "write notes.txt with hello", "effort": "none"},
+            {"agent": "chat", "task": "confirm to the user", "effort": "none"},
+        ],
+        replies=[write_call, {"content": "wrote notes.txt"}],
+        stream_text="all done",
+    )
+    graph = build_graph(llm, make_settings(workspace))
+    events, final = await run_graph(graph, "create a file then confirm")
+
+    assert (workspace / "notes.txt").read_text() == "hello"
+    starts = [e["node"] for e in events if e.get("status") == "start"]
+    assert "files" in starts and "chat" in starts  # both agents ran
+    # only the final (chat) step speaks the answer; the files step feeds forward
+    assert final["response"] == "all done"
+    results = [e for e in events if e.get("status") == "result"]
+    assert any(e["node"] == "files" for e in results)

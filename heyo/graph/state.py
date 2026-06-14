@@ -19,11 +19,14 @@ def _append(left: list, right: list) -> list:
 class AgentState(TypedDict, total=False):
     session_id: str
     messages: Annotated[list[dict[str, Any]], _append]  # OpenAI-format chat history
-    route: str  # chosen agent: chat|files|web|apps|mcp
-    rationale: str  # router's reasoning, surfaced in the UI trace
+    plan: list[dict[str, Any]]  # planner's ordered steps: [{agent, task, effort}]
+    cursor: int  # index of the step currently executing
+    step_results: Annotated[list[dict[str, Any]], _append]  # [{agent, task, result}]
+    route: str  # first step's agent (kept for the trace / back-compat)
+    rationale: str  # planner's one-line summary, surfaced in the UI trace
     skills: list[dict[str, Any]]  # taught .md skills retrieved for this request
     memory_context: str  # relevant past-conversation memories
-    response: str  # final assistant answer
+    response: str  # final assistant answer (last step's output)
 
 
 def emit(writer: StreamWriter | None, event_type: str, **data: Any) -> None:

@@ -268,7 +268,7 @@ function startTurn(){
   const run=turn.querySelector(".run"),steps=turn.querySelector(".steps"),
         sum=turn.querySelector(".runsum"),answer=turn.querySelector(".answer");
   sum.addEventListener("click",()=>run.classList.toggle("open"));
-  const T={t0:Date.now(),route:null,tools:0,thinkSecs:0,seg:null,lastTool:null,acc:"",gotToken:false};
+  const T={t0:Date.now(),route:null,plan:[],tools:0,thinkSecs:0,seg:null,lastTool:null,acc:"",gotToken:false};
 
   function addStep(cls,html,color){
     const d=el("div","step "+cls,html);
@@ -304,13 +304,19 @@ function startTurn(){
         if(ev.memories)bits.push(`${ev.memories} memor${ev.memories>1?"ies":"y"}`);
         if(ev.skills?.length)bits.push(`skill: ${ev.skills.join(", ")}`);
         if(bits.length)addStep("ctx",`recall · ${esc(bits.join(" · "))}`);
-      }else if(node==="router"&&status==="start"){
-        setOrb("--c-router");
-      }else if(node==="router"&&status==="done"&&ev.route){
-        T.route=ev.route;
-        const c=COLOR[ev.route]||"--c-router";
+      }else if(node==="planner"){
+        if(status==="start")setOrb("--c-router");
+        else if(status==="done"){
+          T.plan=(ev.plan||[]).map(s=>s.agent);
+          if(T.plan.length>1)addStep("plan",`plan · ${esc(T.plan.join(" → "))}`,"--c-router");
+        }
+      }else if(status==="start"&&(node in COLOR)){   // an agent step begins
+        closeThink();
+        T.route=node;
+        const c=COLOR[node]||"--c-router";
         run.style.setProperty("--sc",`var(${c})`);
-        addStep("route",`→ ${esc(ev.route)}${ev.rationale?` <span class="why">— ${esc(ev.rationale)}</span>`:""}`,c);
+        const sub=(ev.task&&T.plan.length>1)?` <span class="why">— ${esc(ev.task)}</span>`:"";
+        addStep("route",`→ ${esc(node)}${sub}`,c);
         setOrb(c);
       }else if(status==="tool"){
         closeThink();T.tools++;
@@ -321,6 +327,11 @@ function startTurn(){
         T.lastTool=me;
       }else if(status==="tool_result"&&T.lastTool){
         T.lastTool.querySelector(".res").textContent="→ "+(ev.result||"").trim();
+      }else if(status==="result"){   // an earlier step's output, fed forward
+        closeThink();
+        const me=addStep("tool",`✓ ${esc(node)}<span class="res"></span>`,COLOR[node]||"--c-router");
+        me.querySelector(".res").textContent="→ "+(ev.result||"").trim();
+        me.onclick=()=>me.classList.toggle("open");
       }else if(status==="done"&&ev.note){
         addStep("err",esc(ev.note));
       }
@@ -334,7 +345,7 @@ function startTurn(){
       closeThink();answer.classList.remove("cursor");
       answer.innerHTML=md(response||T.acc||"");
       const dt=((Date.now()-T.t0)/1e3).toFixed(1);
-      const bits=[T.route||"chat"];
+      const bits=[T.plan.length>1?T.plan.join(" → "):(T.route||"chat")];
       if(T.thinkSecs>=1)bits.push(`thought ${Math.round(T.thinkSecs)}s`);
       if(T.tools)bits.push(`${T.tools} tool${T.tools>1?"s":""}`);
       bits.push(`${dt}s`);

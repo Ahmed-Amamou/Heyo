@@ -19,11 +19,13 @@ class FakeLLM(LLMClient):
     """
 
     def __init__(self, route_to: str = "chat", replies: list[dict] | None = None,
-                 stream_text: str = "hello from fake llm"):
+                 stream_text: str = "hello from fake llm", plan: list[dict] | None = None):
         models = ModelsConfig(roles={"general": RoleConfig(model="fake"),
                                      "router": RoleConfig(model="fake")})
         super().__init__(models)
         self.route_to = route_to
+        # plan returned by the planner; defaults to a single step on `route_to`
+        self.plan = plan or [{"agent": route_to, "task": "do it", "effort": "brief"}]
         self.replies = replies or [{"content": "done"}]
         self.stream_text = stream_text
         self.calls: list[dict[str, Any]] = []
@@ -32,7 +34,7 @@ class FakeLLM(LLMClient):
                    think=True):
         self.calls.append({"role": role, "messages": messages, "tools": tools, "think": think})
         if role == "router" or json_schema is not None:
-            return {"content": json.dumps({"route": self.route_to, "rationale": "test"})}
+            return {"content": json.dumps({"steps": self.plan})}
         return self.replies.pop(0) if self.replies else {"content": "done"}
 
     async def stream(self, role, messages, temperature=0.4):
