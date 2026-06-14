@@ -21,10 +21,11 @@ dependencies = [
 [project.optional-dependencies]
 web = ["playwright>=1.48"]
 # server-side ears + mouth (/voice/transcribe, /voice/speak)
+# kokoro-onnx = natural TTS (model from GitHub, not HF); piper-tts = fallback.
 # vosk = STT that works when HuggingFace is unreachable (model from a different
 # host); faster-whisper = higher accuracy when its model can be fetched; av decodes
 # the browser's webm/opus. STT auto-prefers whisper-if-cached, else vosk.
-voice = ["piper-tts>=1.4", "vosk>=0.3.44", "av>=11", "faster-whisper>=1.0"]
+voice = ["kokoro-onnx>=0.4", "piper-tts>=1.4", "vosk>=0.3.44", "av>=11", "faster-whisper>=1.0"]
 # thin mic/speaker client (apps/voice/client.py) — STT/TTS happen on the server
 voice-client = [
     "sounddevice>=0.5",

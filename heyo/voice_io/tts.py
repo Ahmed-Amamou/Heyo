@@ -1,4 +1,9 @@
-"""Text-to-speech with Piper. The voice model is auto-downloaded on first use."""
+"""Text-to-speech. Kokoro-82M by default (natural voice), Piper as fallback.
+
+Both auto-download their model on first use. Kokoro's model + voices come from
+GitHub releases (not HuggingFace), so they fetch fast even when HF is throttled,
+and it runs on CPU via onnxruntime — leaving the GPU for STT and the LLM.
+"""
 
 from __future__ import annotations
 
@@ -17,6 +22,16 @@ import httpx
 HF_BASE = os.getenv(
     "HEYO_PIPER_BASE_URL", "https://huggingface.co/rhasspy/piper-voices/resolve/main"
 ).rstrip("/")
+# Kokoro model + voices live on GitHub releases (fast even when HF is throttled).
+KOKORO_BASE = os.getenv(
+    "HEYO_KOKORO_BASE_URL",
+    "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0",
+).rstrip("/")
+# Default to the float32 model: on CPUs without AVX-512 VNNI (most consumer chips)
+# int8 ops are emulated and ~6x SLOWER, and float32 sounds better anyway. Set
+# HEYO_KOKORO_MODEL=kokoro-v1.0.int8.onnx for the smaller model on a VNNI CPU.
+KOKORO_MODEL = os.getenv("HEYO_KOKORO_MODEL", "kokoro-v1.0.onnx")
+KOKORO_VOICES = "voices-v1.0.bin"
 log = logging.getLogger("heyo")
 
 
@@ -76,7 +91,69 @@ def _download(url: str, dest: Path, attempts: int = 8) -> None:
     log.info("downloaded %s (%.1f MB)", dest.name, dest.stat().st_size / 1e6)
 
 
-class Speaker:
+def make_speaker(data_dir: Path | None = None):
+    """Build the configured TTS engine. HEYO_TTS_ENGINE = kokoro (default) | piper.
+    Kokoro sounds far more natural; Piper is the lightweight fallback if Kokoro
+    can't load (e.g. its deps aren't installed)."""
+    engine = os.getenv("HEYO_TTS_ENGINE", "kokoro").lower()
+    if engine != "piper":
+        try:
+            return KokoroSpeaker(data_dir=data_dir)
+        except Exception as exc:
+            if engine == "kokoro":
+                log.warning("kokoro TTS unavailable (%s); falling back to Piper", exc)
+    return PiperSpeaker(data_dir=data_dir)
+
+
+class KokoroSpeaker:
+    """Kokoro-82M (ONNX) — warm, natural speech. Model/voices auto-download from
+    GitHub on first use; runs on CPU. HEYO_TTS_VOICE picks the voice (e.g.
+    af_heart, af_bella, am_michael, bf_emma); HEYO_TTS_SPEED adjusts pace."""
+
+    def __init__(self, voice: str | None = None, data_dir: Path | None = None):
+        import onnxruntime as rt
+        from kokoro_onnx import Kokoro
+
+        self.voice = voice or os.getenv("HEYO_TTS_VOICE", "af_heart")
+        self.speed = float(os.getenv("HEYO_TTS_SPEED", "1.0"))
+        self.lang = os.getenv("HEYO_TTS_LANG", "en-us")
+        data_dir = Path(data_dir or os.getenv("HEYO_VOICE_DATA", "~/.heyo/voice")).expanduser()
+        data_dir.mkdir(parents=True, exist_ok=True)
+        model_path = data_dir / KOKORO_MODEL
+        voices_path = data_dir / KOKORO_VOICES
+        if not model_path.exists():
+            _download(f"{KOKORO_BASE}/{KOKORO_MODEL}", model_path)
+        if not voices_path.exists():
+            _download(f"{KOKORO_BASE}/{KOKORO_VOICES}", voices_path)
+        self.kokoro = Kokoro(str(model_path), str(voices_path))
+        # kokoro-onnx builds a default-threaded session; swap in one that uses
+        # every core with full graph optimization — TTS is CPU-bound here.
+        opts = rt.SessionOptions()
+        opts.intra_op_num_threads = os.cpu_count() or 4
+        opts.graph_optimization_level = rt.GraphOptimizationLevel.ORT_ENABLE_ALL
+        self.kokoro.sess = rt.InferenceSession(
+            str(model_path), sess_options=opts, providers=["CPUExecutionProvider"]
+        )
+        log.info("kokoro TTS ready (voice=%s)", self.voice)
+
+    def wav_bytes(self, text: str, max_chars: int = 2000) -> bytes:
+        import numpy as np
+
+        text = strip_markdown(text)[:max_chars] or "Done."
+        samples, sr = self.kokoro.create(
+            text, voice=self.voice, speed=self.speed, lang=self.lang
+        )
+        pcm = (np.clip(samples, -1.0, 1.0) * 32767).astype(np.int16)
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(sr)
+            wav.writeframes(pcm.tobytes())
+        return buf.getvalue()
+
+
+class PiperSpeaker:
     def __init__(self, voice: str | None = None, data_dir: Path | None = None):
         from piper import PiperVoice
 
@@ -98,3 +175,7 @@ class Speaker:
         with wave.open(buf, "wb") as wav:
             self.voice.synthesize_wav(text, wav)
         return buf.getvalue()
+
+
+# Back-compat alias (older imports expected `Speaker`).
+Speaker = PiperSpeaker

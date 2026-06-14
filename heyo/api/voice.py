@@ -34,10 +34,10 @@ def _load_stt():
 def _load_tts():
     global _tts
     if _tts is None:
-        from heyo.voice_io.tts import Speaker
+        from heyo.voice_io.tts import make_speaker
 
-        log.info("loading piper voice (first /voice/speak)")
-        _tts = Speaker()
+        log.info("loading text-to-speech (first /voice/speak)")
+        _tts = make_speaker()
     return _tts
 
 

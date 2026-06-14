@@ -64,5 +64,7 @@ Pick one with `--wake vosk|oww|off`; `auto` tries vosk, then oww.
 Server-side voice knobs (set where the API runs): `HEYO_STT_MODEL` (whisper size,
 default `small`), `HEYO_STT_DEVICE` (`auto` — GPU if usable, else CPU; transcription
 runs before the LLM generates, so they don't compete), `HEYO_STT_LANGUAGE` (default
-auto), `HEYO_PIPER_VOICE` (default `en_US-lessac-medium`, auto-downloaded — set
-`HEYO_PIPER_BASE_URL` to a mirror if HuggingFace is throttled on your link).
+auto). TTS is **Kokoro-82M** by default (natural voice; model from GitHub so it
+works when HF is throttled; runs on CPU): `HEYO_TTS_VOICE` (default `af_heart`;
+also `af_bella`, `am_michael`, `bf_emma`, …), `HEYO_TTS_SPEED`. `HEYO_TTS_ENGINE=piper`
+falls back to Piper (`HEYO_PIPER_VOICE`, `HEYO_PIPER_BASE_URL`).
