@@ -136,12 +136,19 @@ class KokoroSpeaker:
         )
         log.info("kokoro TTS ready (voice=%s)", self.voice)
 
-    def wav_bytes(self, text: str, max_chars: int = 2000) -> bytes:
+    @property
+    def current(self) -> str:
+        return self.voice
+
+    def voices(self) -> list[str]:
+        return sorted(self.kokoro.get_voices())
+
+    def wav_bytes(self, text: str, voice: str | None = None, max_chars: int = 2000) -> bytes:
         import numpy as np
 
         text = strip_markdown(text)[:max_chars] or "Done."
         samples, sr = self.kokoro.create(
-            text, voice=self.voice, speed=self.speed, lang=self.lang
+            text, voice=voice or self.voice, speed=self.speed, lang=self.lang
         )
         pcm = (np.clip(samples, -1.0, 1.0) * 32767).astype(np.int16)
         buf = io.BytesIO()
@@ -157,23 +164,26 @@ class PiperSpeaker:
     def __init__(self, voice: str | None = None, data_dir: Path | None = None):
         from piper import PiperVoice
 
-        voice = voice or os.getenv("HEYO_PIPER_VOICE", "en_US-lessac-medium")
+        self.current = voice or os.getenv("HEYO_PIPER_VOICE", "en_US-lessac-medium")
         data_dir = Path(
             data_dir or os.getenv("HEYO_VOICE_DATA", "~/.heyo/voice")
         ).expanduser()
-        model_path = data_dir / f"{voice}.onnx"
+        model_path = data_dir / f"{self.current}.onnx"
         if not model_path.exists():
             data_dir.mkdir(parents=True, exist_ok=True)
-            base = f"{HF_BASE}/{_voice_url_parts(voice)}"
+            base = f"{HF_BASE}/{_voice_url_parts(self.current)}"
             for suffix in (".onnx", ".onnx.json"):
-                _download(base + suffix, data_dir / f"{voice}{suffix}")
-        self.voice = PiperVoice.load(str(model_path))
+                _download(base + suffix, data_dir / f"{self.current}{suffix}")
+        self._piper = PiperVoice.load(str(model_path))
 
-    def wav_bytes(self, text: str, max_chars: int = 1200) -> bytes:
+    def voices(self) -> list[str]:
+        return [self.current]  # Piper loads a single voice model
+
+    def wav_bytes(self, text: str, voice: str | None = None, max_chars: int = 1200) -> bytes:
         text = strip_markdown(text)[:max_chars] or "Done."
         buf = io.BytesIO()
         with wave.open(buf, "wb") as wav:
-            self.voice.synthesize_wav(text, wav)
+            self._piper.synthesize_wav(text, wav)
         return buf.getvalue()
 
 

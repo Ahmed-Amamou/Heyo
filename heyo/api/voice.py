@@ -54,6 +54,14 @@ async def _get(loader, what: str):
 
 class SpeakRequest(BaseModel):
     text: str
+    voice: str | None = None  # per-request voice override (e.g. picked in the UI)
+
+
+@router.get("/voices")
+async def voices():
+    """Available TTS voices + the configured default (for the UI picker)."""
+    tts = await _get(_load_tts, "text-to-speech")
+    return {"voices": tts.voices(), "current": getattr(tts, "current", None)}
 
 
 @router.post("/transcribe")
@@ -75,5 +83,5 @@ async def speak(req: SpeakRequest):
         raise HTTPException(400, "no text to speak")
     tts = await _get(_load_tts, "text-to-speech")
     async with _lock:
-        wav = await asyncio.to_thread(tts.wav_bytes, req.text)
+        wav = await asyncio.to_thread(tts.wav_bytes, req.text, req.voice)
     return Response(content=wav, media_type="audio/wav")

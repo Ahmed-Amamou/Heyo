@@ -167,6 +167,26 @@ footer{
 .hints #speakToggle.on{color:var(--c-mcp)}
 .hints .grow{flex:1}
 
+/* voice picker popover */
+.dock{position:relative}
+.vpanel{
+  position:absolute;bottom:64px;left:4px;width:300px;max-height:48vh;overflow-y:auto;
+  background:var(--bub);border:1px solid var(--hair);border-radius:14px;padding:6px;
+  display:none;z-index:8;box-shadow:0 14px 44px rgba(0,0,0,.55);scrollbar-width:thin;
+}
+.vpanel.open{display:block;animation:rise .15s ease}
+.vpanel .grp{font:10px var(--mono);color:var(--faint);letter-spacing:.14em;
+  text-transform:uppercase;padding:9px 9px 4px}
+.vpanel .v{
+  display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:9px;cursor:pointer;
+  font:13.5px var(--sans);color:var(--dim);transition:background .12s;
+}
+.vpanel .v:hover{background:#1c1c1f;color:var(--txt)}
+.vpanel .v.sel{color:var(--txt)}
+.vpanel .v .tag{margin-left:auto;font:10px var(--mono);color:var(--faint)}
+.vpanel .v.sel .tag::after{content:" ●";color:var(--c-mcp)}
+.vpanel .v.playing .tag::after{content:" ♪";color:var(--c-web)}
+
 @keyframes rise{from{opacity:0;transform:translateY(4px)}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 @media (max-width:560px){.hints .kbd{display:none}.msg-user{max-width:88%}}
@@ -190,8 +210,11 @@ footer{
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V6"/><path d="m6 11 6-6 6 6"/></svg>
       </button>
     </form>
+    <div class="vpanel" id="voicePanel"></div>
     <div class="hints">
       <button type="button" id="speakToggle">replies aloud · off</button>
+      <span>·</span>
+      <button type="button" id="voiceBtn">voice</button>
       <span>·</span>
       <button type="button" id="newChat">new chat</button>
       <span class="grow"></span>
@@ -203,10 +226,12 @@ footer{
 <script>
 const $=s=>document.querySelector(s);
 const main=$("#main"),thread=$("#thread"),input=$("#input"),composer=$("#composer"),
-      micBtn=$("#mic"),orb=$("#orb"),brand=$("#brand"),speakToggle=$("#speakToggle");
+      micBtn=$("#mic"),orb=$("#orb"),brand=$("#brand"),speakToggle=$("#speakToggle"),
+      voiceBtn=$("#voiceBtn"),voicePanel=$("#voicePanel");
 const COLOR={chat:"--c-chat",files:"--c-files",web:"--c-web",apps:"--c-apps",
              mcp:"--c-mcp",router:"--c-router"};
 let sessionId=null,busy=false,speakAll=localStorage.heyoSpeak==="1",audioEl=null;
+let currentVoice=localStorage.heyoVoice||null;
 
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const el=(t,c,html)=>{const d=document.createElement(t);if(c)d.className=c;if(html!=null)d.innerHTML=html;return d;};
@@ -470,7 +495,7 @@ function stopMic(){
 async function speak(text){
   try{
     const resp=await fetch("/voice/speak",{method:"POST",
-      headers:{"Content-Type":"application/json"},body:JSON.stringify({text})});
+      headers:{"Content-Type":"application/json"},body:JSON.stringify({text,voice:currentVoice})});
     if(!resp.ok)return;
     audioEl?.pause();
     audioEl=new Audio(URL.createObjectURL(await resp.blob()));
@@ -486,6 +511,55 @@ speakToggle.addEventListener("click",()=>{
   speakToggle.classList.toggle("on",speakAll);
 });
 if(speakAll){speakToggle.textContent="replies aloud · on";speakToggle.classList.add("on");}
+
+/* ── voice picker: click a voice to hear a sample, pick what you like ── */
+const VLANG={a:"American",b:"British",e:"Spanish",f:"French",h:"Hindi",i:"Italian",j:"Japanese",p:"Portuguese",z:"Chinese"};
+const VOICE_SAMPLE="Hi, I'm Heyo. This is how I sound — pick the voice you like.";
+const vName=v=>{const n=(v.split("_")[1]||v);return n.charAt(0).toUpperCase()+n.slice(1);};
+const vTag=v=>`${VLANG[v[0]]||v[0]} ${v[1]==="m"?"♂":"♀"}`;
+let voicesBuilt=false;
+function setVoiceLabel(){voiceBtn.textContent="voice · "+(currentVoice?vName(currentVoice):"default");}
+if(currentVoice)setVoiceLabel();
+
+async function buildVoicePicker(){
+  let data;
+  try{data=await (await fetch("/voice/voices")).json();}
+  catch{voiceBtn.textContent="voice · n/a";return false;}
+  const voices=data.voices||[];
+  if(voices.length<2){voiceBtn.style.display="none";return false;}
+  if(!currentVoice||!voices.includes(currentVoice))currentVoice=data.current||voices[0];
+  setVoiceLabel();
+  const groups={};
+  for(const v of voices){(groups[VLANG[v[0]]||"Other"]=groups[VLANG[v[0]]||"Other"]||[]).push(v);}
+  const order=["American","British","Spanish","French","Hindi","Italian","Japanese","Portuguese","Chinese","Other"];
+  voicePanel.innerHTML="";
+  for(const g of order){
+    if(!groups[g])continue;
+    voicePanel.appendChild(el("div","grp",esc(g)));
+    for(const v of groups[g].sort((a,b)=>(a[1]+a).localeCompare(b[1]+b))){
+      const row=el("div","v"+(v===currentVoice?" sel":""),`${esc(vName(v))}<span class="tag">${esc(vTag(v))}</span>`);
+      row.onclick=()=>pickVoice(v,row);
+      voicePanel.appendChild(row);
+    }
+  }
+  return true;
+}
+async function pickVoice(v,row){
+  currentVoice=v;localStorage.heyoVoice=v;setVoiceLabel();
+  voicePanel.querySelectorAll(".v").forEach(r=>r.classList.remove("sel","playing"));
+  row.classList.add("sel","playing");
+  await speak(VOICE_SAMPLE);
+  row.classList.remove("playing");
+}
+voiceBtn.addEventListener("click",async e=>{
+  e.stopPropagation();
+  if(!voicesBuilt){voiceBtn.textContent="voice · …";voicesBuilt=await buildVoicePicker()||true;}
+  voicePanel.classList.toggle("open");
+});
+document.addEventListener("click",e=>{
+  if(!e.target.closest("#voicePanel,#voiceBtn"))voicePanel.classList.remove("open");
+});
+
 $("#newChat").addEventListener("click",()=>{
   sessionId=null;thread.innerHTML=EMPTY;input.focus();
 });

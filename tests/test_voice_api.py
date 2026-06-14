@@ -16,8 +16,13 @@ class FakeSTT:
 
 
 class FakeTTS:
-    def wav_bytes(self, text: str) -> bytes:
-        return b"RIFF-fake-wav:" + text.encode()
+    current = "af_heart"
+
+    def voices(self) -> list[str]:
+        return ["af_heart", "am_onyx", "bm_george"]
+
+    def wav_bytes(self, text: str, voice: str | None = None) -> bytes:
+        return b"RIFF-fake-wav:" + (voice or self.current).encode() + b":" + text.encode()
 
 
 @pytest.fixture
@@ -49,7 +54,22 @@ async def test_speak_returns_wav(client):
         resp = await client.post("/voice/speak", json={"text": "hello there"})
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "audio/wav"
-    assert resp.content == b"RIFF-fake-wav:hello there"
+    assert resp.content == b"RIFF-fake-wav:af_heart:hello there"
+
+
+async def test_speak_honors_voice_override(client):
+    async with client:
+        resp = await client.post("/voice/speak", json={"text": "hi", "voice": "am_onyx"})
+    assert resp.status_code == 200
+    assert resp.content == b"RIFF-fake-wav:am_onyx:hi"
+
+
+async def test_voices_lists_options(client):
+    async with client:
+        resp = await client.get("/voice/voices")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "am_onyx" in body["voices"] and body["current"] == "af_heart"
 
 
 async def test_speak_503_when_voice_extra_missing(monkeypatch):
