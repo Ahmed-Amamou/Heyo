@@ -54,8 +54,12 @@ class Settings(BaseSettings):
             # Defaults for first boot before fit_models.py has run.
             cfg = ModelsConfig(
                 roles={
-                    "router": RoleConfig(model="qwen3:4b"),
+                    # router = the planner's model: a fast NON-thinking model. qwen3
+                    # spends ~1000 tokens reasoning before emitting a trivial plan
+                    # (17-42s); decomposition doesn't need that, coder-3b does it in ~2s.
+                    "router": RoleConfig(model="qwen2.5-coder:3b"),
                     "general": RoleConfig(model="qwen3:4b"),
+                    "coder": RoleConfig(model="qwen2.5-coder:3b"),
                     "embedder": RoleConfig(model="nomic-embed-text"),
                 }
             )

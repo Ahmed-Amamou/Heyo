@@ -22,11 +22,12 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 MODELS_FILE = REPO_ROOT / "models.yaml"
 
 # Conservative defaults for ~6GB VRAM (GTX 1660 Ti class hardware).
-# qwen3 is a reasoning model: its thinking costs seconds per step but the steps
-# stream live into the UI, and answer quality is far better than 3B non-reasoning
-# models (which hallucinate on tool tasks). Router uses /no_think (single-turn).
+# general/agents use qwen3 (reasoning model — far better answer quality than 3B
+# non-reasoning models, which hallucinate on tool tasks). The router/planner uses
+# a fast NON-thinking model on purpose: qwen3 burns ~1000 tokens of reasoning
+# before emitting a trivial plan (17-42s), and decomposition doesn't need it.
 DEFAULTS = {
-    "router": "qwen3:4b",
+    "router": "qwen2.5-coder:3b",
     "general": "qwen3:4b",
     "coder": "qwen2.5-coder:3b",
     "embedder": "nomic-embed-text",
@@ -83,10 +84,10 @@ def main() -> int:
     recommended = llmfit_recommendations()
     roles = dict(DEFAULTS)
     if recommended:
-        # Use llmfit's top chat-capable pick for router/general when it is an Ollama-style id.
+        # Use llmfit's top chat-capable pick for the agents (general). The
+        # router/planner stays on the fast non-thinking default on purpose.
         top = next((m for m in recommended if "embed" not in m.lower() and "/" not in m), None)
         if top:
-            roles["router"] = top
             roles["general"] = top
 
     print(f"[fit] role assignment: {roles}")
